@@ -41,4 +41,5 @@
 tail -f /data/adb/modules/oplusPowerController/bypass.log
 ```
 ⚠️ 免责声明 (Disclaimer)
+
 本模块涉及对 Android 内核底层供电节点的直接修改。虽然相关逻辑已经过极其严密的边缘场景测试，但由于各机型底层驱动可能存在差异，使用本模块带来的任何硬件损坏或数据丢失风险由使用者自行承担。
