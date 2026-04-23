@@ -24,7 +24,7 @@ jobs:
         zip -r ../${{ github.event.repository.name }}.zip .
         
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ github.event.repository.name }}
         path: ${{ github.event.repository.name }}/*
@@ -34,7 +34,7 @@ jobs:
       with:
         repo_token: ${{ secrets.RELEASE_TOKEN }}
         file: ${{ github.event.repository.name }}.zip
-        tag: latest
+        tag: ${{ github.event.repository.name }}
         overwrite: true
         file_glob: true
         make_latest: true 
