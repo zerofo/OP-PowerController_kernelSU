@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>旁路充电控制器 · 实时阈值</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #121212;
+            color: #eee;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            padding: 16px;
+            margin: 0;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #1e1e1e;
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .card h2, .card h3 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        button {
+            background: #2c3e66;
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-size: 1rem;
+            font-weight: 500;
+            margin: 8px 0;
+            cursor: pointer;
+            width: 100%;
+        }
+        button.enabled { background: #2c6e2c; }
+        button.disabled { background: #6e2c2c; }
+        .status-badge {
+            font-weight: bold;
+            font-size: 1.2rem;
+            padding: 8px 12px;
+            background: #2a2a2a;
+            border-radius: 12px;
+            display: inline-block;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+        }
+        .info-label { font-weight: 500; color: #aaa; }
+        .info-value { font-weight: 600; }
+        .online { color: #4caf50; }
+        .offline { color: #f44336; }
+        .slider-container { margin: 16px 0; }
+        .slider-label { display: flex; justify-content: space-between; margin-bottom: 8px; }
+        input[type="range"] { width: 100%; height: 6px; -webkit-appearance: none; background: #333; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #4caf50; cursor: pointer; }
+        .debug { font-size: 11px; color: #666; margin-top: 20px; padding-top: 16px; border-top: 1px solid #333; word-break: break-all; }
+        .hint {
+            font-size: 12px;
+            color: #8bc34a;
+            background: #2a2a2a;
+            border-radius: 16px;
+            padding: 6px 12px;
+            margin-top: 12px;
+            text-align: center;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "kernelsu": "./kernelsu.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import { exec, toast, moduleInfo } from 'kernelsu';
+        
+        let MODULE_PATH = null;
+        let CONFIG_FILE = null;
+        let CONTROL_FILE = null;
+        let STATUS_FILE = null;
+        
+        // 兼容 exec 返回结构
+        async function execShell(cmd) {
+            try {
+                const result = await exec(cmd);
+                if (typeof result === 'string') return result.trim();
+                if (result && typeof result === 'object') {
+                    if (result.errno === 0 && result.stdout) return result.stdout.trim();
+                    return '';
+                }
+                return '';
+            } catch(e) {
+                console.error(e);
+                return '';
+            }
+        }
+        
+        async function readStatus() {
+            if (!STATUS_FILE) return {};
+            const content = await execShell(`cat ${STATUS_FILE} 2>/dev/null`);
+            if (!content) return {};
+            const data = {};
+            content.split('\n').forEach(line => {
+                const idx = line.indexOf('=');
+                if (idx > 0) data[line.slice(0, idx)] = line.slice(idx+1);
+            });
+            return data;
+        }
+        
+        async function readConfigDirect() {
+            // 直接读取 config.txt 获取实际存储的阈值
+            if (!CONFIG_FILE) return { upper: null, lower: null };
+            const content = await execShell(`cat ${CONFIG_FILE} 2>/dev/null`);
+            let upper = null, lower = null;
+            content.split('\n').forEach(line => {
+                if (line.startsWith('UPPER_LIMIT=')) upper = line.split('=')[1];
+                if (line.startsWith('LOWER_LIMIT=')) lower = line.split('=')[1];
+            });
+            return { upper, lower };
+        }
+        
+        // 刷新页面所有显示 (电量、模式、USB、阈值滑块及数值)
+        async function updateUI() {
+            if (!MODULE_PATH) return;
+            const status = await readStatus();
+            const auto = status.AUTO_ENABLE === '1';
+            const mode = status.MODE || '未知';
+            const capacity = status.CAPACITY || '--';
+            const usb = status.USB_ONLINE === '1';
+            
+            // 优先从 config.txt 读取真实阈值，保证界面与实际配置同步
+            const config = await readConfigDirect();
+            let upper = config.upper;
+            let lower = config.lower;
+            // 容错: 如果文件解析失败则回退 status 里的值或默认值
+            if (upper === null || upper === undefined) upper = status.UPPER || '91';
+            if (lower === null || lower === undefined) lower = status.LOWER || '78';
+            
+            document.getElementById('modeText').innerHTML = `<span class="status-badge">${mode}</span>`;
+            document.getElementById('capacity').innerText = capacity;
+            document.getElementById('usbState').innerHTML = usb ? '<span class="online">🔌 已插入</span>' : '<span class="offline">⛔ 未插入</span>';
+            document.getElementById('upperVal').innerText = upper;
+            document.getElementById('lowerVal').innerText = lower;
+            // 同步滑块真实位置，防止滑块显示过期值
+            const upperSlider = document.getElementById('upperSlider');
+            const lowerSlider = document.getElementById('lowerSlider');
+            if (upperSlider.value != upper) upperSlider.value = upper;
+            if (lowerSlider.value != lower) lowerSlider.value = lower;
+            
+            const btn = document.getElementById('toggleBtn');
+            if (auto) {
+                btn.innerHTML = '✅ 自动模式已开启';
+                btn.className = 'enabled';
+            } else {
+                btn.innerHTML = '❌ 自动模式已关闭（强制充电）';
+                btn.className = 'disabled';
+            }
+        }
+        
+        // 核心写入阈值（带校验、实时反馈）
+        async function applyThreshold(upperValue = null, lowerValue = null) {
+            if (!CONFIG_FILE) {
+                await toast('模块未就绪');
+                return false;
+            }
+            
+            // 获取当前滑块或参数值
+            let upper, lower;
+            if (upperValue !== null && lowerValue !== null) {
+                upper = upperValue;
+                lower = lowerValue;
+            } else {
+                upper = document.getElementById('upperSlider').value;
+                lower = document.getElementById('lowerSlider').value;
+            }
+            
+            upper = parseInt(upper);
+            lower = parseInt(lower);
+            
+            // 有效性检查
+            if (isNaN(upper) || isNaN(lower)) {
+                await toast('数值无效');
+                return false;
+            }
+            if (upper <= lower) {
+                await toast('❌ 上限必须大于下限！未保存');
+                // 关键：恢复界面为配置文件中的真实值
+                await updateUI();
+                return false;
+            }
+            
+            // 写入配置（原子操作：先覆盖再追加确保两个变量都存在）
+            await execShell(`echo "UPPER_LIMIT=${upper}" > ${CONFIG_FILE}`);
+            await execShell(`echo "LOWER_LIMIT=${lower}" >> ${CONFIG_FILE}`);
+            await execShell(`chmod 644 ${CONFIG_FILE}`);
+            
+            // 立即验证写入是否成功
+            const verify = await readConfigDirect();
+            if (verify.upper == upper && verify.lower == lower) {
+                await toast(`✅ 阈值已实时生效：上限 ${upper}% / 下限 ${lower}%`);
+                // 强制同步UI显示（数值、滑块）
+                document.getElementById('upperVal').innerText = upper;
+                document.getElementById('lowerVal').innerText = lower;
+                // 防止滑块因为某些异步事件不同步
+                const upSlider = document.getElementById('upperSlider');
+                const lowSlider = document.getElementById('lowerSlider');
+                if (upSlider.value != upper) upSlider.value = upper;
+                if (lowSlider.value != lower) lowSlider.value = lower;
+                return true;
+            } else {
+                await toast("❌ 写入失败！请检查模块目录权限");
+                await updateUI(); // 恢复显示原值
+                return false;
+            }
+        }
+        
+        // 切换自动/强制充电模式
+        async function toggleAuto() {
+            if (!CONTROL_FILE) return;
+            const status = await readStatus();
+            const newState = status.AUTO_ENABLE === '1' ? '0' : '1';
+            await execShell(`echo "AUTO_ENABLE=${newState}" > ${CONTROL_FILE}`);
+            await execShell(`chmod 644 ${CONTROL_FILE}`);
+            await toast(newState === '1' ? '自动模式已开启' : '自动模式已关闭（强制充电）');
+            setTimeout(() => updateUI(), 200);
+        }
+        
+        // 初始化界面和事件 (实时调整核心)
+        async function init() {
+            document.getElementById('toggleBtn').innerHTML = '⏳ 加载中...';
+            let infoObj = JSON.parse(await moduleInfo());
+            MODULE_PATH = infoObj.moduleDir;
+            if (!MODULE_PATH) {
+                document.getElementById('debugMsg').innerHTML = '❌ 无法检测模块路径，请确认模块已安装';
+                return;
+            }
+            CONFIG_FILE = `${MODULE_PATH}/config.txt`;
+            CONTROL_FILE = `${MODULE_PATH}/control.txt`;
+            STATUS_FILE = `${MODULE_PATH}/status.txt`;
+            document.getElementById('debugMsg').innerHTML = `✅ 模块路径: ${MODULE_PATH}<br>🔁 拖动滑块松手后自动保存阈值，无需点按钮`;
+            
+            await updateUI();
+            
+            // 绑定主按钮事件
+            document.getElementById('toggleBtn').onclick = toggleAuto;
+            // 保留“应用阈值”按钮，但用户基本不需要手动点了 (实时自动)
+            document.getElementById('applyBtn').onclick = async () => {
+                await applyThreshold();
+            };
+            
+            const upperSlider = document.getElementById('upperSlider');
+            const lowerSlider = document.getElementById('lowerSlider');
+            
+            // 实时显示数值（滑动时立即更新数值标签，不写入）
+            upperSlider.oninput = () => {
+                document.getElementById('upperVal').innerText = upperSlider.value;
+                // 可选：动态提示上下限关系 (只是视觉辅助)
+                const lowerVal = parseInt(lowerSlider.value);
+                if (parseInt(upperSlider.value) <= lowerVal) {
+                    // 给出轻微视觉警告但不强制打断滑动体验
+                    document.getElementById('upperVal').style.color = "#ffaa66";
+                } else {
+                    document.getElementById('upperVal').style.color = "#eee";
+                }
+            };
+            lowerSlider.oninput = () => {
+                document.getElementById('lowerVal').innerText = lowerSlider.value;
+                const upperVal = parseInt(upperSlider.value);
+                if (parseInt(lowerSlider.value) >= upperVal) {
+                    document.getElementById('lowerVal').style.color = "#ffaa66";
+                } else {
+                    document.getElementById('lowerVal').style.color = "#eee";
+                }
+            };
+            
+            // **** 关键改进: 松开滑块 (change) 时自动应用阈值，实现“实时调整” ****
+            upperSlider.onchange = async () => {
+                // 额外校验防止违背 upper > lower
+                const newUpper = parseInt(upperSlider.value);
+                const currentLower = parseInt(lowerSlider.value);
+                if (newUpper <= currentLower) {
+                    await toast(`⚠️ 上限 ${newUpper}% 必须大于下限 ${currentLower}%，未更新`);
+                    await updateUI();  // 立即恢复原配置值
+                    return;
+                }
+                await applyThreshold(newUpper, currentLower);
+                // 恢复颜色样式
+                document.getElementById('upperVal').style.color = "#eee";
+                document.getElementById('lowerVal').style.color = "#eee";
+            };
+            
+            lowerSlider.onchange = async () => {
+                const newLower = parseInt(lowerSlider.value);
+                const currentUpper = parseInt(upperSlider.value);
+                if (newLower >= currentUpper) {
+                    await toast(`⚠️ 下限 ${newLower}% 必须小于上限 ${currentUpper}%，未更新`);
+                    await updateUI();
+                    return;
+                }
+                await applyThreshold(currentUpper, newLower);
+                document.getElementById('upperVal').style.color = "#eee";
+                document.getElementById('lowerVal').style.color = "#eee";
+            };
+            
+            // 为防止意外连续写入造成过度toast, 本身已有验证 + 异步无冲突, 体验完美
+            // 每3秒轮询状态 (电量/模式/充电状态等)
+            setInterval(() => updateUI(), 3000);
+        }
+        
+        init();
+    </script>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h2>⚡ 旁路充电控制器</h2>
+        <button id="toggleBtn">加载中...</button>
+        <div class="info-row"><span class="info-label">当前状态</span><span id="modeText">--</span></div>
+        <div class="info-row"><span class="info-label">电池电量</span><span id="capacity">--</span></div>
+        <div class="info-row"><span class="info-label">USB 状态</span><span id="usbState">--</span></div>
+    </div>
+    <div class="card">
+        <h3>📊 阈值设置 &nbsp;<span style="font-size: 0.75rem; background: #2c3e66; padding: 2px 10px; border-radius: 40px;">实时生效</span></h3>
+        <div class="slider-container">
+            <div class="slider-label"><span>🔋 上限（进入旁路）</span><span><strong id="upperVal" style="font-size: 1.2rem;">91</strong>%</span></div>
+            <input type="range" id="upperSlider" min="50" max="100" step="1" value="91">
+            <div style="font-size: 11px; color: #8bc34a; margin-top: 4px;">↗ 高于此值启用旁路</div>
+        </div>
+        <div class="slider-container">
+            <div class="slider-label"><span>🔋 下限（退出旁路）</span><span><strong id="lowerVal" style="font-size: 1.2rem;">78</strong>%</span></div>
+            <input type="range" id="lowerSlider" min="50" max="100" step="1" value="78">
+            <div style="font-size: 11px; color: #f9a825; margin-top: 4px;">↘ 低于此值恢复正常充电</div>
+        </div>
+        <button id="applyBtn">💾 手动保存阈值（已支持自动保存，备用）</button>
+        <div class="hint">
+            ✨ 实时调节：直接拖动滑块 → 松手即自动保存生效，无需额外点击
+        </div>
+    </div>
+    <div class="debug" id="debugMsg">初始化中...</div>
+</div>
+</body>
+</html>

@@ -1,6 +1,0 @@
-id=oplusPowerController
-name=一加pad2pro旁路充电控制
-version=v91.0
-versionCode=78
-author=wind1
-description=一加pad2pro可用(其他o系设备可以刷入测试)，可强制开启旁路充电。自定义值->刷入后在 /data/adb/modules/oplusPowerController/config.txt 内可修改你想要的值,修改后立即生效。默认大于等于91%电量进入旁路充电，低于等于78%电量恢复正常充电
