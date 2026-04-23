@@ -17,12 +17,18 @@ jobs:
       with:
         submodules: recursive
 
+    
+    - name: Package
+      run: |
+        cd ${{ github.event.repository.name }} && \ 
+        zip -r ../${{ github.event.repository.name }}.zip .
+        
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ github.event.repository.name }}
         path: ${{ github.event.repository.name }}/*
-        
+
     - name: Upload binaries to release
       uses: svenstaro/upload-release-action@v2
       with:
