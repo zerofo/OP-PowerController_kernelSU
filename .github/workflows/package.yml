@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: release_token
     steps:
     - name: Checkout project
       uses: actions/checkout@master
