@@ -1,0 +1,32 @@
+---
+name: package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    steps:
+    - name: Checkout project
+      uses: actions/checkout@master
+      with:
+        submodules: recursive
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ github.event.repository.name }}
+        path: ${{ github.event.repository.name }}/*
+        
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.release_token }}
+        file: ${{ github.event.repository.name }}.zip
+        tag: latest
+        overwrite: true
+        file_glob: true
+        make_latest: true 
